@@ -12017,13 +12017,13 @@ int Abc_CommandRectCEGISClean( Abc_Frame_t * pAbc, int argc, char ** argv)
     argv = &argv[1];
 
     // read input files and strash
-    if ( !Abc_NtkPrepareTwoNtks( stdout, pNtk, argv, argc, &pNtkSpec, &pNtkImpl, &fDelete1, &fDelete2, 1 ) )
+    if (!Abc_NtkPrepareTwoNtks( stdout, pNtk, argv, argc, &pNtkSpec, &pNtkImpl, &fDelete1, &fDelete2, 1 ))
     {
         Abc_Print(-1, "Cannot read the two networks.\n");
         return 1;
     }
 
-    pNtkRect = Abc_RectNaive(pNtkSpec, pNtkImpl);
+    pNtkRect = Abc_RectCEGISClean(pNtkSpec, pNtkImpl);
     Abc_NtkDelete(pNtkSpec);
     Abc_NtkDelete(pNtkImpl);
     Abc_FrameReplaceCurrentNetwork(pAbc, pNtkRect);
