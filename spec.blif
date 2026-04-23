@@ -1,0 +1,16 @@
+.model spec
+.inputs A B C
+.outputs F
+
+# AND gate: D = A AND B
+
+.names A B D
+11 1
+
+# OR gate: F = D OR C
+
+.names D C F
+1- 1
+-1 1
+
+.end

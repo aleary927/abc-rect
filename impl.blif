@@ -1,0 +1,17 @@
+.model impl
+.inputs A B C
+.outputs F
+
+# BUG: XOR instead of AND → D = A XOR B
+
+.names A B D
+10 1
+01 1
+
+# OR gate: F = D OR C
+
+.names D C F
+1- 1
+-1 1
+
+.end

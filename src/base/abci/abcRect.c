@@ -15,13 +15,14 @@ extern Aig_Man_t * Abc_NtkToDar( Abc_Ntk_t * pNtk, int fExors, int fRegisters );
 Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk);
 Abc_Ntk_t * BuildTargetMiter(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkCircuit);
 Abc_Obj_t * OrTree(Abc_Ntk_t *pNtk, Vec_Ptr_t *vNodes);
+
+Abc_Ntk_t * BuildEqualityMiterWithFixedInput(Abc_Ntk_t * pSpec,Abc_Ntk_t * pCircuit, int * in_k, int nPi );
 Vec_Int_t * GetSatVarNums(Abc_Ntk_t *pNtk, int nIn, int startIdx);
 
 int * EvaluateNetwork(Abc_Ntk_t *pNtkSpec, int* pInputs);
 void SubstituteConsts(Abc_Ntk_t *pNtk, int * pConsts, int nConsts, int startIdx);
 
 void AndClause(Abc_Ntk_t *pNtkTarget, Abc_Ntk_t *pNtkClause);
-
 
 Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
 {
@@ -213,6 +214,187 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
     Abc_Ntk_t* pNtkRect;
     return pNtkRect;
 }
+
+// ============= NEW =====================
+Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl) 
+{
+    int i;
+    int nPiNum = Abc_NtkPiNum(pNtkSpec);
+
+    // Build Circuits
+    Abc_Ntk_t *pCircuit = BuildCircuitWithTransforms(pNtkImpl); // impl
+    Abc_Ntk_t *pSpec = pNtkSpec;
+
+    // Build Miter
+    // Target = circuit(X, in) XOR spec(In)
+    Abc_Ntk_t *pTarget = BuildTargetMiter(pSpec, pCircuit); 
+
+    // initialize test set
+    Vec_Ptr_t *vTestSet = Vec_PtrAlloc(100);
+
+    int iterations = 0;
+
+    // sat solver
+    sat_solver *pSat;
+
+    while (true) 
+    {
+        iterations++;
+        printf("\n iterations: %d\n ", iterations);
+
+        pSat = Abc_NtkMiterSatCreate(pTarget, 0);
+        
+        int status= sat_solver_solve(pSat, NULL, NULL, 0, 0, 0, 0);
+
+        // if UNSAT
+        if (status == -1) {
+            printf("no counter example found, is UNSAT");
+            sat_solver_delete(pSat);
+            break;
+        }
+
+        if (status == 0) {
+            printf("error");
+            sat_solver_delete(pSat);
+            return NULL;
+        }
+
+        // else is SAT
+
+        // now get counter examples
+        Vec_Int_t *vInVars = GetSatVarNums(pTarget, nPiNum, 0);
+
+        int *in_k_raw = Sat_SolverGetModel(pSat, vInVars->pArray, nPiNum);
+
+        Vec_PtrPush(vTestSet, in_k_raw);
+
+        int * in_k = (int *)malloc(sizeof(int) * nPiNum);
+        memcpy(in_k, in_k_raw, sizeof(int) * nPiNum);
+
+        sat_solver_delete(pSat);
+
+        printf("\n counter example found\n");
+
+        // do circuit (x,In) == spec(in_k);
+
+        Abc_Ntk_t *pFixedConstraint = BuildEqualityMiterWithFixedInput(pSpec, pCircuit, in_k, nPiNum);
+
+        // refine -> targer = target ^ constraint
+        Abc_Ntk_t *pOldTarget = pTarget;
+
+        pTarget = Abc_NtkMiterAnd(pTarget, pFixedConstraint, 1, 1);
+
+        Abc_NtkDelete(pOldTarget);
+        Abc_NtkDelete(pFixedConstraint);
+    }
+
+    // solve for X only
+
+    Abc_Ntk_t * pFinal = NULL;
+
+    for (i = 0; i < Vec_PtrSize(vTestSet); i++) {
+        int * in_k = (int *)Vec_PtrEntry(vTestSet, i);
+
+        Abc_Ntk_t * pConstraint= BuildEqualityMiterWithFixedInput(pSpec, pCircuit, in_k, nPiNum);
+
+        if (i == 0) {
+            pFinal = pConstraint;
+        }
+        else {
+            Abc_Ntk_t * pOld = pFinal;
+            pFinal = Abc_NtkMiterAnd(pFinal, pConstraint, 1, 1);
+            Abc_NtkDelete(pConstraint);
+            Abc_NtkDelete(pOld);
+        }
+    }
+
+    // solve for x
+
+    sat_solver * pSatFinal = Abc_NtkMiterSatCreate(pFinal, 0);
+
+    int status = sat_solver_solve(pSatFinal, NULL, NULL, 0, 0, 0, 0);
+    
+    if (status != 1)
+    {
+        printf("No valid transformation found\n");
+        return NULL;
+    }
+
+    printf("Valid transformation found!\n");
+
+    // Extract X 
+    Vec_Int_t * vXVars = GetSatVarNums(pFinal, Abc_NtkPiNum(pFinal), nPiNum);
+    int * xVals = Sat_SolverGetModel(pSatFinal, vXVars->pArray, Abc_NtkPiNum(pFinal) - nPiNum);
+
+    // Apply Transforms
+
+    SubstituteConsts(pCircuit, xVals, Abc_NtkPiNum(pFinal) - nPiNum, nPiNum);
+    Abc_NtkDelete(pFinal);
+    Abc_NtkDelete(pTarget);
+
+    return pCircuit;
+    
+}
+
+Abc_Ntk_t * BuildEqualityMiterWithFixedInput( Abc_Ntk_t * pSpec, Abc_Ntk_t * pCircuit, int * in_k, int nPi )
+{
+    int i;
+
+    Abc_Ntk_t * pMiter = Abc_NtkAlloc(ABC_NTK_STRASH, ABC_FUNC_AIG, 1);
+
+    // copy PIs
+    Abc_Obj_t * pObj;
+    Abc_NtkForEachPi(pCircuit, pObj, i)
+    {
+        Abc_Obj_t * pNewPi = Abc_NtkCreatePi(pMiter);
+        pObj->pCopy = pNewPi;
+
+        if (i < nPi)
+            Abc_NtkPi(pSpec, i)->pCopy = pNewPi;
+    }
+
+    // build circuit logic
+    Abc_AigForEachAnd(pCircuit, pObj, i)
+    {
+        pObj->pCopy =
+            Abc_AigAnd((Abc_Aig_t *)pMiter->pManFunc,
+                       Abc_ObjChild0Copy(pObj),
+                       Abc_ObjChild1Copy(pObj));
+    }
+
+    // build spec logic
+    Abc_AigForEachAnd(pSpec, pObj, i)
+    {
+        pObj->pCopy =
+            Abc_AigAnd((Abc_Aig_t *)pMiter->pManFunc,
+                       Abc_ObjChild0Copy(pObj),
+                       Abc_ObjChild1Copy(pObj));
+    }
+
+    // XOR outputs (equality check)
+    Vec_Ptr_t * vXor = Vec_PtrAlloc(Abc_NtkPoNum(pSpec));
+
+    for (i = 0; i < Abc_NtkPoNum(pSpec); i++)
+    {
+        Vec_PtrPush(vXor,
+            Abc_AigXor((Abc_Aig_t *)pMiter->pManFunc,
+                       Abc_ObjChild0Copy(Abc_NtkPo(pCircuit, i)),
+                       Abc_ObjChild0Copy(Abc_NtkPo(pSpec, i))));
+    }
+
+    Abc_Obj_t * pOr = OrTree(pMiter, vXor);
+    Vec_PtrFree(vXor);
+
+    Abc_Obj_t * pPo = Abc_NtkCreatePo(pMiter);
+    Abc_ObjAddFanin(pPo, pOr);
+
+    // IMPORTANT: apply constant inputs
+    SubstituteConsts(pMiter, in_k, nPi, 0);
+
+    return pMiter;
+}
+// ============= NEW =====================
+
 
 Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk)
 {
