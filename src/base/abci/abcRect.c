@@ -218,122 +218,125 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
 // ============= NEW =====================
 Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl) 
 {
-    int i;
-    int nPiNum = Abc_NtkPiNum(pNtkSpec);
-
-    // Build Circuits
-    Abc_Ntk_t *pCircuit = BuildCircuitWithTransforms(pNtkImpl); // impl
-    Abc_Ntk_t *pSpec = pNtkSpec;
-
-    // Build Miter
-    // Target = circuit(X, in) XOR spec(In)
-    Abc_Ntk_t *pTarget = BuildTargetMiter(pSpec, pCircuit); 
-
-    // initialize test set
-    Vec_Ptr_t *vTestSet = Vec_PtrAlloc(100);
-
+    int i, status;
+    int nPiNum = Abc_NtkPiNum(pNtkSpec); // num primary inputs
     int iterations = 0;
 
-    // sat solver
-    sat_solver *pSat;
+    // convert circuit to transformed version
+    Abc_Ntk_t *pCircuit = BuildCircuitWithTransforms(pNtkImpl); 
+    int nTotalPi = Abc_NtkPiNum(pCircuit); // all inputs
+    int nXVarNum = nTotalPi - nPiNum; // transformation variables
+
+    // Target = (Circuit(X, In) != Spec(In))
+    Abc_Ntk_t *pTarget = BuildTargetMiter(pNtkSpec, pCircuit); 
+
+    // (Circuit(X, in_k) == Spec(in_k))
+    Abc_Ntk_t *pSuccessAcc = NULL;
 
     while (true) 
     {
         iterations++;
-        printf("\n iterations: %d\n ", iterations);
+        printf("Iteration %d \n", iterations);
 
-        pSat = Abc_NtkMiterSatCreate(pTarget, 0);
-        
-        int status= sat_solver_solve(pSat, NULL, NULL, 0, 0, 0, 0);
+        sat_solver *pSat = Abc_NtkMiterSatCreate(pTarget, 0);
+        status = sat_solver_solve(pSat, NULL, NULL, 0, 0, 0, 0);
 
-        // if UNSAT
+        // IF UNSAT
         if (status == -1) {
-            printf("no counter example found, is UNSAT");
+            printf("No more counter-examples found. \n");
             sat_solver_delete(pSat);
-            break;
+            break; 
         }
 
-        if (status == 0) {
-            printf("error");
-            sat_solver_delete(pSat);
-            return NULL;
-        }
-
-        // else is SAT
-
-        // now get counter examples
+        // extract the Counter-Example (in_k)
         Vec_Int_t *vInVars = GetSatVarNums(pTarget, nPiNum, 0);
-
         int *in_k_raw = Sat_SolverGetModel(pSat, vInVars->pArray, nPiNum);
-
-        Vec_PtrPush(vTestSet, in_k_raw);
-
-        int * in_k = (int *)malloc(sizeof(int) * nPiNum);
+        
+        int *in_k = (int *)malloc(sizeof(int) * nPiNum);
         memcpy(in_k, in_k_raw, sizeof(int) * nPiNum);
-
+        
         sat_solver_delete(pSat);
+        Vec_IntFree(vInVars);
 
-        printf("\n counter example found\n");
+        // returns 1 if (Circuit != Spec). 
+        Abc_Ntk_t *pConstraint = BuildEqualityMiterWithFixedInput(pNtkSpec, pCircuit, in_k, nPiNum);
+        
+        // need X s.t (Circuit == Spec)
+        // AND the NEGATION of the miter 
+        Abc_Ntk_t *pEquality = Abc_NtkDup(pConstraint);
+        Abc_ObjXorFaninC(Abc_NtkPo(pEquality, 0), 0); // Flip to "Equality"
 
-        // do circuit (x,In) == spec(in_k);
+        if (pSuccessAcc == NULL) {
+            pSuccessAcc = pEquality;
+        } else {
+            Abc_Ntk_t *pOldAcc = pSuccessAcc;
+            pSuccessAcc = Abc_NtkMiterAnd(pSuccessAcc, pEquality, 0, 0);
+            Abc_NtkDelete(pOldAcc);
+            Abc_NtkDelete(pEquality);
+        }
 
-        Abc_Ntk_t *pFixedConstraint = BuildEqualityMiterWithFixedInput(pSpec, pCircuit, in_k, nPiNum);
-
-        // refine -> targer = target ^ constraint
+        // refine pTarget
         Abc_Ntk_t *pOldTarget = pTarget;
-
-        pTarget = Abc_NtkMiterAnd(pTarget, pFixedConstraint, 1, 1);
+        pTarget = Abc_NtkMiterAnd(pTarget, pSuccessAcc, 0, 0);
 
         Abc_NtkDelete(pOldTarget);
-        Abc_NtkDelete(pFixedConstraint);
+        Abc_NtkDelete(pConstraint);
+        free(in_k);
     }
 
-    // solve for X only
+    // extract the final solution for X
+    if (pSuccessAcc == NULL) return NULL;
 
-    Abc_Ntk_t * pFinal = NULL;
+    // solve for the final valid X assignment
+    sat_solver * pSatFinal = Abc_NtkMiterSatCreate(pSuccessAcc, 0);
+    int statusFinal = sat_solver_solve(pSatFinal, NULL, NULL, 0, 0, 0, 0);
 
-    for (i = 0; i < Vec_PtrSize(vTestSet); i++) {
-        int * in_k = (int *)Vec_PtrEntry(vTestSet, i);
-
-        Abc_Ntk_t * pConstraint= BuildEqualityMiterWithFixedInput(pSpec, pCircuit, in_k, nPiNum);
-
-        if (i == 0) {
-            pFinal = pConstraint;
-        }
-        else {
-            Abc_Ntk_t * pOld = pFinal;
-            pFinal = Abc_NtkMiterAnd(pFinal, pConstraint, 1, 1);
-            Abc_NtkDelete(pConstraint);
-            Abc_NtkDelete(pOld);
-        }
-    }
-
-    // solve for x
-
-    sat_solver * pSatFinal = Abc_NtkMiterSatCreate(pFinal, 0);
-
-    int status = sat_solver_solve(pSatFinal, NULL, NULL, 0, 0, 0, 0);
-    
-    if (status != 1)
+    if (statusFinal == 1) 
     {
-        printf("No valid transformation found\n");
-        return NULL;
+        printf("\n=== RECTIFICATION REPORT ===\n");
+
+        // nXVarNum should be (Abc_NtkPiNum(pCircuit) - nPiNum)
+        Vec_Int_t * vXVars = GetSatVarNums(pSuccessAcc, nXVarNum, nPiNum);
+        int * xVals = Sat_SolverGetModel(pSatFinal, vXVars->pArray, nXVarNum);
+
+        Abc_Obj_t * pNode;
+        int i, gateIdx = 0;
+        int changeCount = 0;
+
+        // compare the SAT result to the original Implementation nodes
+        Abc_NtkForEachNode(pNtkImpl, pNode, i) 
+        {
+            int f0  = xVals[gateIdx * 3 + 0];
+            int f1  = xVals[gateIdx * 3 + 1];
+            int out = xVals[gateIdx * 3 + 2];
+
+            if (f0 || f1 || out) 
+            {
+                changeCount++;
+                printf("Node %d (Name: %s) fixed with config: [%d %d %d]\n", 
+                        pNode->Id, Abc_ObjName(pNode), f0, f1, out);
+            }
+            gateIdx++;
+        }
+        printf("Total fix points identified: %d\n", changeCount);
+        printf("============================\n\n");
+
+        // rectified circuit 
+        SubstituteConsts(pCircuit, xVals, nXVarNum, nPiNum);
+        Vec_IntFree(vXVars);
+    } 
+    else 
+    {
+        printf("No valid transformation found.\n");
+        Abc_NtkDelete(pCircuit);
+        pCircuit = NULL;
     }
 
-    printf("Valid transformation found!\n");
-
-    // Extract X 
-    Vec_Int_t * vXVars = GetSatVarNums(pFinal, Abc_NtkPiNum(pFinal), nPiNum);
-    int * xVals = Sat_SolverGetModel(pSatFinal, vXVars->pArray, Abc_NtkPiNum(pFinal) - nPiNum);
-
-    // Apply Transforms
-
-    SubstituteConsts(pCircuit, xVals, Abc_NtkPiNum(pFinal) - nPiNum, nPiNum);
-    Abc_NtkDelete(pFinal);
-    Abc_NtkDelete(pTarget);
+    sat_solver_delete(pSatFinal);
+    if (pTarget) Abc_NtkDelete(pTarget);
+    if (pSuccessAcc) Abc_NtkDelete(pSuccessAcc);
 
     return pCircuit;
-    
 }
 
 Abc_Ntk_t * BuildEqualityMiterWithFixedInput( Abc_Ntk_t * pSpec, Abc_Ntk_t * pCircuit, int * in_k, int nPi )
