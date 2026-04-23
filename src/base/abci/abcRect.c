@@ -332,6 +332,24 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
         // apply new values to rectified circuit 
         SubstituteConsts(pCircuit, xVals, nXVarNum, nPiNum);
         Vec_IntFree(vXVars);
+
+        // ================= clean up for blif creation =================
+        // remove the dead logic gates created by SubstituteConsts
+        pCircuit = Abc_NtkStrash( pCircuit, 0, 0, 0 ); 
+
+        // 2. remove the X vars
+        Abc_Obj_t * pObjPi;
+        int j;
+        Abc_NtkForEachPi( pCircuit, pObjPi, j ) 
+        {
+            if ( Abc_ObjFanoutNum(pObjPi) == 0 ) 
+            {
+                Abc_NtkDeleteObj( pObjPi );
+                j--;
+            }
+        }
+        // ================= clean up for blif creation =================
+
     } 
     else // cannot be rectified
     {
@@ -345,24 +363,25 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
     if (pTarget) Abc_NtkDelete(pTarget);
     if (pSuccessAcc) Abc_NtkDelete(pSuccessAcc);
 
-    // TO blif
-    // if (pCircuit != NULL) 
-    // {
-    //     // convert AIG to Logic (SOP)
-    //     Abc_Ntk_t * pNtkLogic = Abc_NtkToLogic(pCircuit);
+    // ================= blif creation =================
+    if (pCircuit != NULL) 
+    {
+        // convert AIG to Logic (SOP)
+        Abc_Ntk_t * pNtkLogic = Abc_NtkToLogic(pCircuit);
 
-    //     // convert to Netlist 
-    //     Abc_Ntk_t * pNtkNetlist = Abc_NtkToNetlist(pNtkLogic);
+        // convert to Netlist 
+        Abc_Ntk_t * pNtkNetlist = Abc_NtkToNetlist(pNtkLogic);
 
-    //     // write to BLIF 
-    //     Io_WriteBlif( pNtkNetlist, "rectified_output.blif", 1, 0, 0 );
+        // write to BLIF 
+        Io_WriteBlif( pNtkNetlist, "rectified_output.blif", 1, 0, 0 );
 
-    //     printf("File written successfully!\n");
+        printf("File written successfully!\n");
 
-    //     // 4. Cleanup
-    //     Abc_NtkDelete( pNtkNetlist );
-    //     Abc_NtkDelete( pNtkLogic );
-    // }
+        Abc_NtkDelete( pNtkNetlist );
+        Abc_NtkDelete( pNtkLogic );
+    }
+    // ================= blif creation =================
+    
     return pCircuit;
 }
 
