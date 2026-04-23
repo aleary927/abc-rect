@@ -222,14 +222,16 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
     int nPiNum = Abc_NtkPiNum(pNtkSpec); // num primary inputs
     int iterations = 0;
 
-    // convert circuit to transformed version
+    // convert circuit to transformed version (3 muxes and an AND gate)
     Abc_Ntk_t *pCircuit = BuildCircuitWithTransforms(pNtkImpl); 
     int nTotalPi = Abc_NtkPiNum(pCircuit); // all inputs
     int nXVarNum = nTotalPi - nPiNum; // transformation variables
 
+    // build miter
     // Target = (Circuit(X, In) != Spec(In))
     Abc_Ntk_t *pTarget = BuildTargetMiter(pNtkSpec, pCircuit); 
 
+    // store all constraints
     // (Circuit(X, in_k) == Spec(in_k))
     Abc_Ntk_t *pSuccessAcc = NULL;
 
@@ -238,6 +240,7 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
         iterations++;
         printf("Iteration %d \n", iterations);
 
+        // convert aig into sat
         sat_solver *pSat = Abc_NtkMiterSatCreate(pTarget, 0);
         status = sat_solver_solve(pSat, NULL, NULL, 0, 0, 0, 0);
 
@@ -248,6 +251,7 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
             break; 
         }
 
+        // Otherwise Sat, then continue
         // extract the Counter-Example (in_k)
         Vec_Int_t *vInVars = GetSatVarNums(pTarget, nPiNum, 0);
         int *in_k_raw = Sat_SolverGetModel(pSat, vInVars->pArray, nPiNum);
@@ -259,6 +263,7 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
         Vec_IntFree(vInVars);
 
         // returns 1 if (Circuit != Spec). 
+        // Fix primary inputs to counterexamples, leaving X free
         Abc_Ntk_t *pConstraint = BuildEqualityMiterWithFixedInput(pNtkSpec, pCircuit, in_k, nPiNum);
         
         // need X s.t (Circuit == Spec)
@@ -266,16 +271,18 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
         Abc_Ntk_t *pEquality = Abc_NtkDup(pConstraint);
         Abc_ObjXorFaninC(Abc_NtkPo(pEquality, 0), 0); // Flip to "Equality"
 
+        // accumulate successful conditions
         if (pSuccessAcc == NULL) {
             pSuccessAcc = pEquality;
         } else {
             Abc_Ntk_t *pOldAcc = pSuccessAcc;
+            // make sure X configuration works will all examples
             pSuccessAcc = Abc_NtkMiterAnd(pSuccessAcc, pEquality, 0, 0);
             Abc_NtkDelete(pOldAcc);
             Abc_NtkDelete(pEquality);
         }
 
-        // refine pTarget
+        // refine pTarget so no duplicate counterexamples found
         Abc_Ntk_t *pOldTarget = pTarget;
         pTarget = Abc_NtkMiterAnd(pTarget, pSuccessAcc, 0, 0);
 
@@ -295,10 +302,11 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
     {
         printf("\n=== RECTIFICATION REPORT ===\n");
 
-        // nXVarNum should be (Abc_NtkPiNum(pCircuit) - nPiNum)
+        // get all X values for the muxes
         Vec_Int_t * vXVars = GetSatVarNums(pSuccessAcc, nXVarNum, nPiNum);
         int * xVals = Sat_SolverGetModel(pSatFinal, vXVars->pArray, nXVarNum);
 
+        // Prints all nodes that were fixed
         Abc_Obj_t * pNode;
         int i, gateIdx = 0;
         int changeCount = 0;
@@ -306,9 +314,9 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
         // compare the SAT result to the original Implementation nodes
         Abc_NtkForEachNode(pNtkImpl, pNode, i) 
         {
-            int f0  = xVals[gateIdx * 3 + 0];
-            int f1  = xVals[gateIdx * 3 + 1];
-            int out = xVals[gateIdx * 3 + 2];
+            int f0  = xVals[gateIdx * 3 + 0]; // invert f0
+            int f1  = xVals[gateIdx * 3 + 1]; // invert f1
+            int out = xVals[gateIdx * 3 + 2]; // invert f2
 
             if (f0 || f1 || out) 
             {
@@ -321,21 +329,40 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
         printf("Total fix points identified: %d\n", changeCount);
         printf("============================\n\n");
 
-        // rectified circuit 
+        // apply new values to rectified circuit 
         SubstituteConsts(pCircuit, xVals, nXVarNum, nPiNum);
         Vec_IntFree(vXVars);
     } 
-    else 
+    else // cannot be rectified
     {
         printf("No valid transformation found.\n");
         Abc_NtkDelete(pCircuit);
         pCircuit = NULL;
     }
 
+    // memory cleanup
     sat_solver_delete(pSatFinal);
     if (pTarget) Abc_NtkDelete(pTarget);
     if (pSuccessAcc) Abc_NtkDelete(pSuccessAcc);
 
+    // TO blif
+    // if (pCircuit != NULL) 
+    // {
+    //     // convert AIG to Logic (SOP)
+    //     Abc_Ntk_t * pNtkLogic = Abc_NtkToLogic(pCircuit);
+
+    //     // convert to Netlist 
+    //     Abc_Ntk_t * pNtkNetlist = Abc_NtkToNetlist(pNtkLogic);
+
+    //     // write to BLIF 
+    //     Io_WriteBlif( pNtkNetlist, "rectified_output.blif", 1, 0, 0 );
+
+    //     printf("File written successfully!\n");
+
+    //     // 4. Cleanup
+    //     Abc_NtkDelete( pNtkNetlist );
+    //     Abc_NtkDelete( pNtkLogic );
+    // }
     return pCircuit;
 }
 
@@ -391,7 +418,6 @@ Abc_Ntk_t * BuildEqualityMiterWithFixedInput( Abc_Ntk_t * pSpec, Abc_Ntk_t * pCi
     Abc_Obj_t * pPo = Abc_NtkCreatePo(pMiter);
     Abc_ObjAddFanin(pPo, pOr);
 
-    // IMPORTANT: apply constant inputs
     SubstituteConsts(pMiter, in_k, nPi, 0);
 
     return pMiter;
