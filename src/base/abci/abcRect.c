@@ -216,7 +216,7 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
 }
 
 // ============= NEW =====================
-Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl) 
+Abc_Ntk_t * Abc_RectIterSatTwo(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl) 
 {
     int i, status;
     int nPiNum = Abc_NtkPiNum(pNtkSpec); // num primary inputs

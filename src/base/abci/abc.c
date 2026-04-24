@@ -82,7 +82,7 @@ ABC_NAMESPACE_IMPL_START
 
 static int Abc_CommandRectNaive              ( Abc_Frame_t * pAbc, int argc, char ** argv );
 static int Abc_CommandRectIterSat            ( Abc_Frame_t * pAbc, int argc, char ** argv );
-static int Abc_CommandRectCEGISClean         ( Abc_Frame_t * pAbc, int argc, char ** argv );
+static int Abc_CommandRectIterSatTwo         ( Abc_Frame_t * pAbc, int argc, char ** argv );
 
 
 static int Abc_CommandPrintStats             ( Abc_Frame_t * pAbc, int argc, char ** argv );
@@ -927,7 +927,7 @@ void Abc_Init( Abc_Frame_t * pAbc )
 {
     Cmd_CommandAdd( pAbc, "Various", "rect", Abc_CommandRectNaive, 1);
     Cmd_CommandAdd( pAbc, "Various", "rect2", Abc_CommandRectIterSat, 1);
-    Cmd_CommandAdd( pAbc, "Various", "rect3", Abc_CommandRectCEGISClean, 1);
+    Cmd_CommandAdd( pAbc, "Various", "rect3", Abc_CommandRectIterSatTwo, 1);
 
     Cmd_CommandAdd( pAbc, "Printing",     "ps",            Abc_CommandPrintStats,       0 );
     Cmd_CommandAdd( pAbc, "Printing",     "print_stats",   Abc_CommandPrintStats,       0 );
@@ -12002,7 +12002,7 @@ int Abc_CommandRectIterSat(Abc_Frame_t *pAbc, int argc, char ** argv)
     return 0;
 }
 
-int Abc_CommandRectCEGISClean( Abc_Frame_t * pAbc, int argc, char ** argv) 
+int Abc_CommandRectIterSatTwo( Abc_Frame_t * pAbc, int argc, char ** argv) 
 {
     if (argc != 3)
     {
@@ -12023,7 +12023,7 @@ int Abc_CommandRectCEGISClean( Abc_Frame_t * pAbc, int argc, char ** argv)
         return 1;
     }
 
-    pNtkRect = Abc_RectCEGISClean(pNtkSpec, pNtkImpl);
+    pNtkRect = Abc_RectIterSatTwo(pNtkSpec, pNtkImpl);
     Abc_NtkDelete(pNtkSpec);
     Abc_NtkDelete(pNtkImpl);
     Abc_FrameReplaceCurrentNetwork(pAbc, pNtkRect);

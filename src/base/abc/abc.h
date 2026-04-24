@@ -548,7 +548,7 @@ static inline void        Abc_ObjSetMvVar( Abc_Obj_t * pObj, void * pV) { Vec_At
 /* abcRect.c*/
 extern ABC_DLL Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl);
 extern ABC_DLL Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl);
-extern ABC_DLL Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl);
+extern ABC_DLL Abc_Ntk_t * Abc_RectIterSatTwo(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl);
 
 /*=== abcAig.c ==========================================================*/
 extern ABC_DLL Abc_Aig_t *        Abc_AigAlloc( Abc_Ntk_t * pNtk );
