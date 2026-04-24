@@ -1,0 +1,7 @@
+# Benchmark "naiveimpl" written by ABC on Fri Apr 24 00:03:10 2026
+.model naiveimpl
+.inputs A B
+.outputs F
+.names A B F
+11 1
+.end

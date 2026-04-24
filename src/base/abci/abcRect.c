@@ -220,7 +220,7 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
 {
     int i, status;
     int nPiNum = Abc_NtkPiNum(pNtkSpec); // num primary inputs
-    int iterations = 0;
+    int iterations = 0; // K
 
     // convert circuit to transformed version (3 muxes and an AND gate)
     Abc_Ntk_t *pCircuit = BuildCircuitWithTransforms(pNtkImpl); 
@@ -233,7 +233,7 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
 
     // store all constraints
     // (Circuit(X, in_k) == Spec(in_k))
-    Abc_Ntk_t *pSuccessAcc = NULL;
+    Abc_Ntk_t *pSuccessAcc = NULL; // TestSet
 
     while (true) 
     {
@@ -300,6 +300,7 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
 
     if (statusFinal == 1) 
     {
+        // Report stuff
         printf("\n=== RECTIFICATION REPORT ===\n");
 
         // get all X values for the muxes
@@ -373,7 +374,7 @@ Abc_Ntk_t * Abc_RectCEGISClean(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
         Abc_Ntk_t * pNtkNetlist = Abc_NtkToNetlist(pNtkLogic);
 
         // write to BLIF 
-        Io_WriteBlif( pNtkNetlist, "rectified_output.blif", 1, 0, 0 );
+        Io_WriteBlif( pNtkNetlist, "patched.blif", 1, 0, 0 );
 
         printf("File written successfully!\n");
 

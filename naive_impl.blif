@@ -1,0 +1,9 @@
+.model naiveimpl
+.inputs A B
+.outputs F
+
+.names A B F
+1- 1
+-1 1
+
+.end
