@@ -474,13 +474,13 @@ Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk)
             pFanin0Mux, 
             pFanin1Mux
         );
+        pNewPi = Abc_NtkCreatePi(pNtkCircuit);
         Abc_Obj_t *pOutMux = Abc_AigMux(
             (Abc_Aig_t *)pNtkCircuit->pManFunc, 
             pNewPi, 
             pFaninMuxAnd, 
             Abc_ObjNot(pFaninMuxAnd)
         ); 
-        pNewPi = Abc_NtkCreatePi(pNtkCircuit);
         Abc_AigReplace(
             (Abc_Aig_t *)pNtkCircuit->pManFunc, 
             pObj->pCopy,
