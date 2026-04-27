@@ -4,12 +4,15 @@
 
 ABC_NAMESPACE_IMPL_START
 
+extern Abc_Ntk_t * Abc_NtkInter( Abc_Ntk_t * pNtkOn, Abc_Ntk_t * pNtkOff, int fRelation, int fVerbose );
+
 Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk);
 Abc_Ntk_t * BuildTargetMiter(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkCircuit);
 Abc_Obj_t * OrTree(Abc_Ntk_t *pNtk, Vec_Ptr_t *vNodes);
 
 Vec_Int_t * GetPiSatVarNums(Abc_Ntk_t *pNtk, int nIn, int startIdx);
 void SubPiByIdx(Abc_Ntk_t *pNtk, int startIdx, Vec_Int_t *vConsts, int fDelete);
+
 
 Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
 {
@@ -109,7 +112,7 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
             int f1  = xVals[gateIdx * 3 + 1]; // invert f1
             int out = xVals[gateIdx * 3 + 2]; // invert out
 
-            if (f0 || f1 || out) 
+            if (!f0 || !f1 || !out) 
             {
                 changeCount++;
                 printf("Node %d (Name: %s) fixed with config: [%d %d %d]\n", 
@@ -143,24 +146,21 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
 Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
 {
     int i;
-    Abc_Obj_t *pNode;
+    Abc_Obj_t *pObj, *pTarget;
     int rectPossible = 0;
-    Abc_Print(-2, "Nodes: \n");
     Abc_Ntk_t *pNtkM0, *pNtkM1, *pNtkImplConstNode;
     Abc_Aig_t *pMan;
-    Abc_AigForEachAnd(pNtkImpl, pNode, i)
+    Abc_AigForEachAnd(pNtkImpl, pObj, i)
     {
-
-        printf("i: %d\n", i);
         pNtkImplConstNode = Abc_NtkDup(pNtkImpl);
         pMan = (Abc_Aig_t *) pNtkImplConstNode->pManFunc;
-        Abc_AigReplace(pMan, pNode->pCopy, Abc_AigConst1(pNtkImplConstNode), 0);
+        Abc_AigReplace(pMan, pObj->pCopy, Abc_AigConst1(pNtkImplConstNode), 0);
         pNtkM1 = Abc_NtkMiter(pNtkSpec, pNtkImplConstNode, 0, 0, 0, 0);
         Abc_NtkDelete(pNtkImplConstNode);
 
         pNtkImplConstNode = Abc_NtkDup(pNtkImpl); 
         pMan = (Abc_Aig_t * ) pNtkImplConstNode->pManFunc;
-        Abc_AigReplace(pMan, pNode->pCopy, Abc_ObjNot(Abc_AigConst1(pNtkImplConstNode)), 0);
+        Abc_AigReplace(pMan, pObj->pCopy, Abc_ObjNot(Abc_AigConst1(pNtkImplConstNode)), 0);
         pNtkM0 = Abc_NtkMiter(pNtkSpec, pNtkImplConstNode, 0, 0, 0, 0);
         Abc_NtkDelete(pNtkImplConstNode);
 
@@ -169,43 +169,53 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
         {
             Abc_Print(-2, "Found node where rectification is possible.\n");
             rectPossible = 1;
+            pTarget = pObj;
+            Abc_NtkDelete(pNtkAnd);
             break;
         }
 
         Abc_NtkDelete(pNtkAnd);
-        Abc_NtkDelete(pNtkM0);
+        Abc_NtkDelete(pNtkM0); 
         Abc_NtkDelete(pNtkM1);
     }
 
     // Abc_Obj_t *pTarget = pNode;
+    Abc_Ntk_t * pNtkPatch = Abc_NtkInter(pNtkM0, pNtkM1, 0, 0);
 
-    // printf("Here\n");
-    // Abc_AigForEachAnd(pNtkM0, pNode, i)
-    // {
-    //     pNode->pCopy = Abc_AigAnd((Abc_Aig_t *)pNtkImpl->pManFunc, Abc_ObjChild0Copy(pNode), Abc_ObjChild1Copy(pNode));
-    // }
-    // Abc_Obj_t *pRectNode = Abc_ObjFanin0(Abc_NtkCo(pNtkM0, 0));
+    if (pNtkPatch == NULL)
+    {
+        printf("Could not simplify patch using interpolation.\n");
+        pNtkPatch = pNtkM0;
+    }
+    else 
+    {
+        Abc_NtkDelete(pNtkM0); 
+    }
+    Abc_NtkDelete(pNtkM1);
 
-    // Abc_AigReplace((Abc_Aig_t *)pNtkImpl->pManFunc, pTarget, pRectNode->pCopy, 0);
+    Abc_Ntk_t* pNtkRect = Abc_NtkDup(pNtkImpl);
 
-    // inter for patch
-    // insert into impl network
-    // replace target node with patch
-    // Abc_AigReplace()
+    Abc_NtkForEachPi(pNtkPatch, pObj, i)
+    {
+        pObj->pCopy = Abc_NtkPi(pNtkRect, i);
+    }
 
-    // for each node:
-        // check if rectification possible at node: 
-        // create miter M0 (between spec and impl where target node is replaced by 0)
-        // create miter M1 (between spec and impl where target node is replaced by 1) 
-        // create network which is M0 AND M1 
-        // if network UNSAT, rectification possible at target node, break loop
+    Abc_AigForEachAnd(pNtkPatch, pObj, i)
+    {
+        pObj->pCopy = Abc_AigAnd(
+            (Abc_Aig_t *)pNtkRect->pManFunc, 
+            Abc_ObjChild0Copy(pObj), 
+            Abc_ObjChild1Copy(pObj)
+        );
+    }
 
-    // if rectification possible at some node:
-    // compute interpolant
-    // simplify interpolant 
-    // insert interpolant into impl at target node
+    Abc_AigReplace(
+        (Abc_Aig_t *)pNtkRect->pManFunc, 
+        pTarget->pCopy, 
+        Abc_ObjChild0Copy(Abc_NtkPo(pNtkPatch, 0)), 
+        0
+    );
 
-    Abc_Ntk_t* pNtkRect = NULL;
     return pNtkRect;
 }
 
