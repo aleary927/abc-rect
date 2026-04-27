@@ -172,25 +172,6 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
     if (pTarget) Abc_NtkDelete(pTarget);
     if (pSuccessAcc) Abc_NtkDelete(pSuccessAcc);
 
-    // ================= blif creation =================
-    if (pCircuit != NULL) 
-    {
-        // convert AIG to Logic (SOP)
-        Abc_Ntk_t * pNtkLogic = Abc_NtkToLogic(pCircuit);
-
-        // convert to Netlist 
-        Abc_Ntk_t * pNtkNetlist = Abc_NtkToNetlist(pNtkLogic);
-
-        // write to BLIF 
-        Io_WriteBlif( pNtkNetlist, "hwExamplePatched.blif", 1, 0, 0 );
-
-        printf("File written successfully!\n");
-
-        Abc_NtkDelete( pNtkNetlist );
-        Abc_NtkDelete( pNtkLogic );
-    }
-    // ================= blif creation =================
-    
     return pCircuit;
 }
 
