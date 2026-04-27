@@ -82,7 +82,6 @@ ABC_NAMESPACE_IMPL_START
 
 static int Abc_CommandRectNaive              ( Abc_Frame_t * pAbc, int argc, char ** argv );
 static int Abc_CommandRectIterSat            ( Abc_Frame_t * pAbc, int argc, char ** argv );
-static int Abc_CommandRectIterSatTwo         ( Abc_Frame_t * pAbc, int argc, char ** argv );
 
 
 static int Abc_CommandPrintStats             ( Abc_Frame_t * pAbc, int argc, char ** argv );
@@ -927,7 +926,6 @@ void Abc_Init( Abc_Frame_t * pAbc )
 {
     Cmd_CommandAdd( pAbc, "Various", "rect", Abc_CommandRectNaive, 1);
     Cmd_CommandAdd( pAbc, "Various", "rect2", Abc_CommandRectIterSat, 1);
-    Cmd_CommandAdd( pAbc, "Various", "rect3", Abc_CommandRectIterSatTwo, 1);
 
     Cmd_CommandAdd( pAbc, "Printing",     "ps",            Abc_CommandPrintStats,       0 );
     Cmd_CommandAdd( pAbc, "Printing",     "print_stats",   Abc_CommandPrintStats,       0 );
@@ -11996,34 +11994,6 @@ int Abc_CommandRectIterSat(Abc_Frame_t *pAbc, int argc, char ** argv)
     }
 
     pNtkRect = Abc_RectIterSat(pNtkSpec, pNtkImpl);
-    Abc_NtkDelete(pNtkSpec);
-    Abc_NtkDelete(pNtkImpl);
-    Abc_FrameReplaceCurrentNetwork(pAbc, pNtkRect);
-    return 0;
-}
-
-int Abc_CommandRectIterSatTwo( Abc_Frame_t * pAbc, int argc, char ** argv) 
-{
-    if (argc != 3)
-    {
-        Abc_Print(-2, "Provide 2 arguments.\n"); 
-        return 1;
-    }
-
-    int fDelete1, fDelete2;
-    Abc_Ntk_t *pNtkSpec, *pNtkImpl, *pNtk, *pNtkRect;
-    pNtk = Abc_FrameReadNtk(pAbc);
-    argc--; 
-    argv = &argv[1];
-
-    // read input files and strash
-    if (!Abc_NtkPrepareTwoNtks( stdout, pNtk, argv, argc, &pNtkSpec, &pNtkImpl, &fDelete1, &fDelete2, 1 ))
-    {
-        Abc_Print(-1, "Cannot read the two networks.\n");
-        return 1;
-    }
-
-    pNtkRect = Abc_RectIterSatTwo(pNtkSpec, pNtkImpl);
     Abc_NtkDelete(pNtkSpec);
     Abc_NtkDelete(pNtkImpl);
     Abc_FrameReplaceCurrentNetwork(pAbc, pNtkRect);
