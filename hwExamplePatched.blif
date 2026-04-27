@@ -1,0 +1,51 @@
+# Benchmark "hw6impl" written by ABC on Mon Apr 27 01:32:08 2026
+.model hw6impl
+.inputs a0 a1 b0 b1
+.outputs z0 z1
+.names a0 b0 new_n7
+11 1
+.names a1 b1 new_n8
+11 1
+.names a0 b0 new_n9
+01 1
+.names new_n7 new_n9 new_n10
+01 1
+.names b0 new_n10 new_n11
+10 1
+.names b0 new_n10 new_n12
+01 1
+.names new_n11 new_n12 new_n13
+00 1
+.names b0 new_n13 new_n14
+00 1
+.names b0 new_n13 new_n15
+01 1
+.names new_n14 new_n15 new_n16
+10 1
+.names new_n8 new_n16 new_n17
+10 1
+.names new_n7 new_n17 new_n18
+00 1
+.names new_n7 new_n17 new_n19
+11 1
+.names new_n18 new_n19 z0
+00 1
+.names a1 b0 new_n21
+11 1
+.names new_n16 new_n21 new_n22
+01 1
+.names a0 b1 new_n23
+11 1
+.names new_n22 new_n23 new_n24
+11 1
+.names new_n22 new_n23 new_n25
+00 1
+.names new_n24 new_n25 new_n26
+00 1
+.names new_n17 new_n26 new_n27
+01 1
+.names new_n17 new_n26 new_n28
+10 1
+.names new_n27 new_n28 z1
+00 0
+.end

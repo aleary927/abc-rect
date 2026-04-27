@@ -1,4 +1,4 @@
-# Benchmark "impl" written by ABC on Fri Apr 24 02:08:15 2026
+# Benchmark "impl" written by ABC on Sun Apr 26 03:55:00 2026
 .model impl
 .inputs A B C
 .outputs F

@@ -1,0 +1,30 @@
+.model hw6spec
+.inputs a0 a1 b0 b1
+.outputs z0 z1
+
+.names f g z0
+01 1
+10 1
+
+.names a0 b0 f
+11 1
+
+.names a1 b1 g
+11 1
+
+.names g h z1
+01 1
+10 1
+
+.names i j h
+01 1
+10 1
+
+.names b0 a1 i
+11 1
+
+.names b1 a0 j
+11 1
+
+.end
+

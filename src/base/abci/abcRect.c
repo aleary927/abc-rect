@@ -374,7 +374,7 @@ Abc_Ntk_t * Abc_RectIterSatTwo(Abc_Ntk_t * pNtkSpec, Abc_Ntk_t * pNtkImpl)
         Abc_Ntk_t * pNtkNetlist = Abc_NtkToNetlist(pNtkLogic);
 
         // write to BLIF 
-        Io_WriteBlif( pNtkNetlist, "patched.blif", 1, 0, 0 );
+        Io_WriteBlif( pNtkNetlist, "hwExamplePatched.blif", 1, 0, 0 );
 
         printf("File written successfully!\n");
 
@@ -444,7 +444,6 @@ Abc_Ntk_t * BuildEqualityMiterWithFixedInput( Abc_Ntk_t * pSpec, Abc_Ntk_t * pCi
 }
 // ============= NEW =====================
 
-
 Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk)
 {
     Abc_Ntk_t *pNtkCircuit = Abc_NtkDup(pNtk);
@@ -456,7 +455,7 @@ Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk)
         pNewPi = Abc_NtkCreatePi(pNtkCircuit);
         pFanin0Mux = Abc_AigMux
             ((Abc_Aig_t *)pNtkCircuit->pManFunc, 
-            pNewPi, 
+            pNewPi,     
             Abc_ObjChild0Copy(pObj), 
             Abc_ObjNot(Abc_ObjChild0Copy(pObj))
         );

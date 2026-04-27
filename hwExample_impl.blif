@@ -1,0 +1,53 @@
+.model hw6impl
+.inputs a0 a1 b0 b1
+.outputs z0 z1
+
+.names s0 e0 z0
+01 1
+10 1
+
+.names e0 r0 z1
+01 1
+10 1
+
+.names e1 s5 r0
+01 1
+10 1
+
+.names e2 s2 e1
+11 1
+
+.names s1 e2 e0 
+11 1
+
+.names e3 s4 e2
+01 1
+10 1
+
+.names s3 b0 e3
+01 1
+10 1
+
+.names a0 b0 s0
+11 1
+
+.names a1 b1 s1
+11 1
+
+.names a1 b0 s2
+11 1
+
+.names a0 b0 s3
+01 1
+10 1
+11 1
+
+.names b0 s4
+0 1
+
+.names a0 b1 s5
+11 1
+
+.end
+
+
