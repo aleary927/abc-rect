@@ -17,12 +17,11 @@ Abc_Ntk_t * BuildTargetMiter(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkCircuit);
 Abc_Obj_t * OrTree(Abc_Ntk_t *pNtk, Vec_Ptr_t *vNodes);
 
 Abc_Ntk_t * BuildEqualityMiterWithFixedInput(Abc_Ntk_t * pSpec,Abc_Ntk_t * pCircuit, int * in_k, int nPi );
-Vec_Int_t * GetSatVarNums(Abc_Ntk_t *pNtk, int nIn, int startIdx);
+Vec_Int_t * GetPiSatVarNums(Abc_Ntk_t *pNtk, int nIn, int startIdx);
 
 int * EvaluateNetwork(Abc_Ntk_t *pNtkSpec, int* pInputs);
-void SubstituteConsts(Abc_Ntk_t *pNtk, int * pConsts, int nConsts, int startIdx);
-
-void AndClause(Abc_Ntk_t *pNtkTarget, Abc_Ntk_t *pNtkClause);
+void SubstituteInputConsts(Abc_Ntk_t *pNtk, int * pConsts, int nConsts, int startIdx, int fDelete);
+void SubPiByIdx(Abc_Ntk_t *pNtk, int startIdx, Vec_Int_t *vConsts, int fDelete);
 
 Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
 {
@@ -61,11 +60,8 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
 
         // Otherwise Sat, then continue
         // extract the Counter-Example (in_k)
-        Vec_Int_t *vInVars = GetSatVarNums(pTarget, nPiNum, 0);
-        int *in_k_raw = Sat_SolverGetModel(pSat, vInVars->pArray, nPiNum);
-        
-        int *in_k = (int *)malloc(sizeof(int) * nPiNum);
-        memcpy(in_k, in_k_raw, sizeof(int) * nPiNum);
+        Vec_Int_t *vInVars = GetPiSatVarNums(pTarget, nPiNum, 0);
+        int *in_k = Sat_SolverGetModel(pSat, vInVars->pArray, nPiNum);
         
         sat_solver_delete(pSat);
         Vec_IntFree(vInVars);
@@ -112,20 +108,21 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
         printf("\n=== RECTIFICATION REPORT ===\n");
 
         // get all X values for the muxes
-        Vec_Int_t * vXVars = GetSatVarNums(pSuccessAcc, nXVarNum, nPiNum);
+        Vec_Int_t * vXVars = GetPiSatVarNums(pSuccessAcc, nXVarNum, nPiNum);
         int * xVals = Sat_SolverGetModel(pSatFinal, vXVars->pArray, nXVarNum);
+        Vec_Int_t *vXVals = Vec_IntAllocArray(xVals, nXVarNum);
 
         // Prints all nodes that were fixed
         Abc_Obj_t * pNode;
-        int i, gateIdx = 0;
+        int gateIdx = 0;
         int changeCount = 0;
 
         // compare the SAT result to the original Implementation nodes
-        Abc_NtkForEachNode(pNtkImpl, pNode, i) 
+        Abc_AigForEachAnd(pNtkImpl, pNode, i) 
         {
             int f0  = xVals[gateIdx * 3 + 0]; // invert f0
             int f1  = xVals[gateIdx * 3 + 1]; // invert f1
-            int out = xVals[gateIdx * 3 + 2]; // invert f2
+            int out = xVals[gateIdx * 3 + 2]; // invert out
 
             if (f0 || f1 || out) 
             {
@@ -139,26 +136,8 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
         printf("============================\n\n");
 
         // apply new values to rectified circuit 
-        SubstituteConsts(pCircuit, xVals, nXVarNum, nPiNum);
+        SubPiByIdx(pCircuit, nPiNum, vXVals, 1);
         Vec_IntFree(vXVars);
-
-        // ================= clean up for blif creation =================
-        // remove the dead logic gates created by SubstituteConsts
-        pCircuit = Abc_NtkStrash( pCircuit, 0, 0, 0 ); 
-
-        // 2. remove the X vars
-        Abc_Obj_t * pObjPi;
-        int j;
-        Abc_NtkForEachPi( pCircuit, pObjPi, j ) 
-        {
-            if ( Abc_ObjFanoutNum(pObjPi) == 0 ) 
-            {
-                Abc_NtkDeleteObj( pObjPi );
-                j--;
-            }
-        }
-        // ================= clean up for blif creation =================
-
     } 
     else // cannot be rectified
     {
@@ -213,7 +192,7 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
         Abc_NtkDelete(pNtkM1);
     }
 
-    Abc_Obj_t *pTarget = pNode;
+    // Abc_Obj_t *pTarget = pNode;
 
     // printf("Here\n");
     // Abc_AigForEachAnd(pNtkM0, pNode, i)
@@ -241,7 +220,7 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
     // simplify interpolant 
     // insert interpolant into impl at target node
 
-    Abc_Ntk_t* pNtkRect;
+    Abc_Ntk_t* pNtkRect = NULL;
     return pNtkRect;
 }
 
@@ -297,11 +276,10 @@ Abc_Ntk_t * BuildEqualityMiterWithFixedInput( Abc_Ntk_t * pSpec, Abc_Ntk_t * pCi
     Abc_Obj_t * pPo = Abc_NtkCreatePo(pMiter);
     Abc_ObjAddFanin(pPo, pOr);
 
-    SubstituteConsts(pMiter, in_k, nPi, 0);
+    SubstituteInputConsts(pMiter, in_k, nPi, 0, 0);
 
     return pMiter;
 }
-// ============= NEW =====================
 
 Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk)
 {
@@ -456,7 +434,7 @@ Abc_Obj_t * OrTree(Abc_Ntk_t *pNtk, Vec_Ptr_t *vNodes)
 }
 
 
-Vec_Int_t * GetSatVarNums(Abc_Ntk_t *pNtk, int nIn, int startIdx)
+Vec_Int_t * GetPiSatVarNums(Abc_Ntk_t *pNtk, int nIn, int startIdx)
 {
     Vec_Int_t * vCiIds;
     int i;
@@ -499,11 +477,44 @@ int * EvaluateNetwork(Abc_Ntk_t *pNtkSpec, int * pInputs)
 }
 
 
-void SubstituteConsts(Abc_Ntk_t *pNtk, int * pConsts, int nConsts, int startIdx)
+void SubPiByIdx(Abc_Ntk_t *pNtk, int startIdx, Vec_Int_t *vConsts, int fDelete)
+{
+    Abc_Obj_t *pObj;
+    int c, i;
+    Vec_Ptr_t *vPis = Vec_PtrAlloc(vConsts->nSize);
+    Vec_IntForEachEntry(vConsts, c, i)
+    {
+        pObj = Abc_NtkPi(pNtk, startIdx + i);
+        Vec_PtrPush(vPis, pObj);
+        if (c)
+        {
+            Abc_AigReplace((Abc_Aig_t *)pNtk->pManFunc, pObj, Abc_AigConst1(pNtk), 1);
+        }
+        else 
+        {
+            Abc_AigReplace((Abc_Aig_t *)pNtk->pManFunc, pObj, Abc_ObjNot(Abc_AigConst1(pNtk)), 1);
+        }
+    }
+
+    if (!fDelete)
+    {
+        return;
+    }
+
+    Vec_PtrForEachEntry(Abc_Obj_t *, vPis, pObj, i)
+    {
+        assert(Abc_ObjFanoutNum(pObj) == 0);
+        Abc_NtkDeleteObj(pObj);
+    }
+
+    Vec_PtrFree(vPis);
+    assert(Abc_NtkCheck(pNtk));
+}
+
+void SubstituteInputConsts(Abc_Ntk_t *pNtk, int * pConsts, int nConsts, int startIdx, int fDelete)
 {
     Abc_Obj_t *pObj;
     int i;
-    int nPiNumStart = Abc_NtkPiNum(pNtk);
     for (i = 0; i < nConsts; i++)
     {
         pObj = Abc_NtkPi(pNtk, i + startIdx);
@@ -516,45 +527,9 @@ void SubstituteConsts(Abc_Ntk_t *pNtk, int * pConsts, int nConsts, int startIdx)
         {
             Abc_AigReplace((Abc_Aig_t *)pNtk->pManFunc, pObj, Abc_ObjNot(Abc_AigConst1(pNtk)), 1);
         }
-        // Abc_NtkDeleteObj(pObj);
     }
-    // assert(nPiNumStart - nConsts == Abc_NtkPiNum(pNtk));
-    Gia_Obj_t *pAnd; 
-    Gia_ParSim_t *pPars; 
-    Gia_ManSim_t *pManSim; 
-    Gia_Man_t *pAig; 
+
     assert(Abc_AigCheck((Abc_Aig_t *)pNtk->pManFunc));
-}
-
-void AndClause(Abc_Ntk_t *pNtkTarget, Abc_Ntk_t *pNtkClause)
-{
-    int tVarIdx = Abc_NtkPiNum(pNtkTarget) - Abc_NtkPiNum(pNtkClause);
-
-    int i; 
-    Abc_Obj_t *pObj;
-
-    Abc_NtkForEachPi(pNtkClause, pObj, i)
-    {
-        pObj->pCopy = Abc_NtkPi(pNtkTarget, i + tVarIdx);
-    }
-
-    // copy clause structure into target
-    Abc_AigForEachAnd(pNtkClause, pObj, i)
-    {
-        Abc_Obj_t *pFanin0 = Abc_ObjChild0Copy(pObj);
-        Abc_Obj_t *pFanin1 = Abc_ObjChild1Copy(pObj);
-        pObj->pCopy = Abc_AigAnd((Abc_Aig_t *)pNtkTarget->pManFunc, pFanin0, pFanin1);
-    }
-
-    // create and between clause output and current target output
-    Abc_Obj_t *pClauseOut = Abc_ObjChild0Copy(Abc_NtkPo(pNtkClause, 0));
-    Abc_Obj_t *pTargetOut = Abc_ObjChild0(Abc_NtkPo(pNtkTarget, 0));
-    Abc_Obj_t *pAnd = Abc_AigAnd((Abc_Aig_t *)pNtkTarget->pManFunc, pTargetOut, pClauseOut);
-
-    // replace target output with and
-    Abc_ObjPatchFanin(Abc_NtkPo(pNtkTarget, 0), Abc_ObjIsComplement(pTargetOut) ? Abc_ObjNot(pTargetOut) : pTargetOut, pAnd);
-
-    assert(Abc_AigCheck((Abc_Aig_t *)pNtkTarget->pManFunc));
 }
 
 ABC_NAMESPACE_IMPL_END
