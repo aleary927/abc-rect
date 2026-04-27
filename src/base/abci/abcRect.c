@@ -1,26 +1,14 @@
 #include "base/abc/abc.h" 
-#include "base/abc/abcInt.h"
-#include "aig/gia/gia.h"
-#include "base/main/main.h"
 #include "misc/vec/vecInt.h"
-#include "opt/fsim/fsimInt.h"
-#include "opt/sim/sim.h"
 #include "sat/bsat/satSolver.h"
-#include "sat/cnf/cnf.h"
 
 ABC_NAMESPACE_IMPL_START
-
-extern Aig_Man_t * Abc_NtkToDar( Abc_Ntk_t * pNtk, int fExors, int fRegisters );
 
 Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk);
 Abc_Ntk_t * BuildTargetMiter(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkCircuit);
 Abc_Obj_t * OrTree(Abc_Ntk_t *pNtk, Vec_Ptr_t *vNodes);
 
-Abc_Ntk_t * BuildEqualityMiterWithFixedInput(Abc_Ntk_t * pSpec,Abc_Ntk_t * pCircuit, int * in_k, int nPi );
 Vec_Int_t * GetPiSatVarNums(Abc_Ntk_t *pNtk, int nIn, int startIdx);
-
-int * EvaluateNetwork(Abc_Ntk_t *pNtkSpec, int* pInputs);
-void SubstituteInputConsts(Abc_Ntk_t *pNtk, int * pConsts, int nConsts, int startIdx, int fDelete);
 void SubPiByIdx(Abc_Ntk_t *pNtk, int startIdx, Vec_Int_t *vConsts, int fDelete);
 
 Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
@@ -386,37 +374,6 @@ Vec_Int_t * GetPiSatVarNums(Abc_Ntk_t *pNtk, int nIn, int startIdx)
     return vCiIds;
 }
 
-int * EvaluateNetwork(Abc_Ntk_t *pNtkSpec, int * pInputs)
-{
-    Aig_Man_t * pAig = Abc_NtkToDar(pNtkSpec, 0, 0);
-    // create sat solver
-    Cnf_Dat_t * pCnf = Cnf_Derive(pAig, 1);
-
-    sat_solver *pSat = sat_solver_new();
-    Cnf_DataWriteIntoSolver(pCnf, 1, 0);
-
-    Abc_Obj_t *pObj; 
-    int i;
-    Abc_NtkForEachPi(pNtkSpec, pObj, i)
-    {
-        int v = pCnf->pVarNums[pObj->Id];
-        lit l = toLitCond(v, pInputs[i] ? 0 : 1);
-        sat_solver_addclause(pSat, &l, &l + 1);
-    }
-
-    int pPoVarNums[Abc_NtkPoNum(pNtkSpec)];
-    Abc_NtkForEachPo(pNtkSpec, pObj, i)
-    {
-        pPoVarNums[i] = pCnf->pVarNums[pObj->Id];
-    }
-
-    int status = sat_solver_solve(pSat, NULL, NULL, 0, 0, 0, 0);
-    printf("status: %d\n", status);
-
-    return Sat_SolverGetModel(pSat, pPoVarNums, Abc_NtkPoNum(pNtkSpec));
-}
-
-
 void SubPiByIdx(Abc_Ntk_t *pNtk, int startIdx, Vec_Int_t *vConsts, int fDelete)
 {
     Abc_Obj_t *pObj;
@@ -449,27 +406,6 @@ void SubPiByIdx(Abc_Ntk_t *pNtk, int startIdx, Vec_Int_t *vConsts, int fDelete)
 
     Vec_PtrFree(vPis);
     assert(Abc_NtkCheck(pNtk));
-}
-
-void SubstituteInputConsts(Abc_Ntk_t *pNtk, int * pConsts, int nConsts, int startIdx, int fDelete)
-{
-    Abc_Obj_t *pObj;
-    int i;
-    for (i = 0; i < nConsts; i++)
-    {
-        pObj = Abc_NtkPi(pNtk, i + startIdx);
-
-        if (pConsts[i])
-        {
-            Abc_AigReplace((Abc_Aig_t *)pNtk->pManFunc, pObj, Abc_AigConst1(pNtk), 1);
-        }
-        else 
-        {
-            Abc_AigReplace((Abc_Aig_t *)pNtk->pManFunc, pObj, Abc_ObjNot(Abc_AigConst1(pNtk)), 1);
-        }
-    }
-
-    assert(Abc_AigCheck((Abc_Aig_t *)pNtk->pManFunc));
 }
 
 ABC_NAMESPACE_IMPL_END
