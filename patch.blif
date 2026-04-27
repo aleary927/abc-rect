@@ -1,0 +1,9 @@
+# Benchmark "impl" written by ABC on Mon Apr 27 04:00:51 2026
+.model impl
+.inputs A B C n7 n11 n16 n20 n24 n29
+.outputs F
+.names A B new_n11_1
+11 1
+.names C new_n11_1 F
+00 0
+.end
