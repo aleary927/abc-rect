@@ -37,6 +37,8 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
     // build miter
     // Target = (Circuit(X, In) != Spec(In))
     Abc_Ntk_t *pTarget = BuildTargetMiter(pNtkSpec, pCircuit); 
+    Abc_Ntk_t *pTargetOrig = Abc_NtkDup(pTarget);
+    Abc_ObjXorFaninC(Abc_NtkPo(pTargetOrig, 0), 0); // Flip to "Equality"
 
     // store all constraints
     // (Circuit(X, in_k) == Spec(in_k))
@@ -62,28 +64,22 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
         // extract the Counter-Example (in_k)
         Vec_Int_t *vInVars = GetPiSatVarNums(pTarget, nPiNum, 0);
         int *in_k = Sat_SolverGetModel(pSat, vInVars->pArray, nPiNum);
-        
+        Vec_Int_t *vIn_k = Vec_IntAllocArray(in_k, nPiNum);
         sat_solver_delete(pSat);
         Vec_IntFree(vInVars);
 
-        // returns 1 if (Circuit != Spec). 
-        // Fix primary inputs to counterexamples, leaving X free
-        Abc_Ntk_t *pConstraint = BuildEqualityMiterWithFixedInput(pNtkSpec, pCircuit, in_k, nPiNum);
+        // create constraint (Circuit(X, in_k) == Spec(in_k))
+        Abc_Ntk_t *pConstraint = Abc_NtkDup(pTargetOrig);
+        SubPiByIdx(pConstraint, 0, vIn_k, 0);
         
-        // need X s.t (Circuit == Spec)
-        // AND the NEGATION of the miter 
-        Abc_Ntk_t *pEquality = Abc_NtkDup(pConstraint);
-        Abc_ObjXorFaninC(Abc_NtkPo(pEquality, 0), 0); // Flip to "Equality"
-
-        // accumulate successful conditions
+        // accumulate test patterns
         if (pSuccessAcc == NULL) {
-            pSuccessAcc = pEquality;
+            pSuccessAcc = pConstraint;
         } else {
             Abc_Ntk_t *pOldAcc = pSuccessAcc;
-            // make sure X configuration works will all examples
-            pSuccessAcc = Abc_NtkMiterAnd(pSuccessAcc, pEquality, 0, 0);
+            pSuccessAcc = Abc_NtkMiterAnd(pSuccessAcc, pConstraint, 0, 0);
             Abc_NtkDelete(pOldAcc);
-            Abc_NtkDelete(pEquality);
+            Abc_NtkDelete(pConstraint);
         }
 
         // refine pTarget so no duplicate counterexamples found
@@ -91,9 +87,10 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
         pTarget = Abc_NtkMiterAnd(pTarget, pSuccessAcc, 0, 0);
 
         Abc_NtkDelete(pOldTarget);
-        Abc_NtkDelete(pConstraint);
-        free(in_k);
+        Vec_IntFree(vIn_k);
     }
+
+    Abc_NtkDelete(pTargetOrig);
 
     // extract the final solution for X
     if (pSuccessAcc == NULL) return NULL;
@@ -222,63 +219,6 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
 
     Abc_Ntk_t* pNtkRect = NULL;
     return pNtkRect;
-}
-
-Abc_Ntk_t * BuildEqualityMiterWithFixedInput( Abc_Ntk_t * pSpec, Abc_Ntk_t * pCircuit, int * in_k, int nPi )
-{
-    int i;
-
-    Abc_Ntk_t * pMiter = Abc_NtkAlloc(ABC_NTK_STRASH, ABC_FUNC_AIG, 1);
-
-    // copy PIs
-    Abc_Obj_t * pObj;
-    Abc_NtkForEachPi(pCircuit, pObj, i)
-    {
-        Abc_Obj_t * pNewPi = Abc_NtkCreatePi(pMiter);
-        pObj->pCopy = pNewPi;
-
-        if (i < nPi)
-            Abc_NtkPi(pSpec, i)->pCopy = pNewPi;
-    }
-
-    // build circuit logic
-    Abc_AigForEachAnd(pCircuit, pObj, i)
-    {
-        pObj->pCopy =
-            Abc_AigAnd((Abc_Aig_t *)pMiter->pManFunc,
-                       Abc_ObjChild0Copy(pObj),
-                       Abc_ObjChild1Copy(pObj));
-    }
-
-    // build spec logic
-    Abc_AigForEachAnd(pSpec, pObj, i)
-    {
-        pObj->pCopy =
-            Abc_AigAnd((Abc_Aig_t *)pMiter->pManFunc,
-                       Abc_ObjChild0Copy(pObj),
-                       Abc_ObjChild1Copy(pObj));
-    }
-
-    // XOR outputs (equality check)
-    Vec_Ptr_t * vXor = Vec_PtrAlloc(Abc_NtkPoNum(pSpec));
-
-    for (i = 0; i < Abc_NtkPoNum(pSpec); i++)
-    {
-        Vec_PtrPush(vXor,
-            Abc_AigXor((Abc_Aig_t *)pMiter->pManFunc,
-                       Abc_ObjChild0Copy(Abc_NtkPo(pCircuit, i)),
-                       Abc_ObjChild0Copy(Abc_NtkPo(pSpec, i))));
-    }
-
-    Abc_Obj_t * pOr = OrTree(pMiter, vXor);
-    Vec_PtrFree(vXor);
-
-    Abc_Obj_t * pPo = Abc_NtkCreatePo(pMiter);
-    Abc_ObjAddFanin(pPo, pOr);
-
-    SubstituteInputConsts(pMiter, in_k, nPi, 0, 0);
-
-    return pMiter;
 }
 
 Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk)
