@@ -11993,7 +11993,9 @@ int Abc_CommandRectIterSat(Abc_Frame_t *pAbc, int argc, char ** argv)
         return 1;
     }
 
-    pNtkRect = Abc_RectIterSat(pNtkSpec, pNtkImpl);
+    abctime clk = Abc_Clock();
+    pNtkRect = Abc_RectIterSat(pNtkSpec, pNtkImpl, 0);
+    Abc_PrintTime(-1, "Runtime", Abc_Clock() - clk);
     Abc_NtkDelete(pNtkSpec);
     Abc_NtkDelete(pNtkImpl);
     Abc_FrameReplaceCurrentNetwork(pAbc, pNtkRect);
@@ -12022,7 +12024,9 @@ int Abc_CommandRectNaive( Abc_Frame_t * pAbc, int argc, char ** argv )
         return 1;
     }
 
-    pNtkRect = Abc_RectNaive(pNtkSpec, pNtkImpl);
+    abctime clk = Abc_Clock();
+    pNtkRect = Abc_RectNaive(pNtkSpec, pNtkImpl, 0);
+    Abc_PrintTime(-1, "Runtime", Abc_Clock() - clk);
     Abc_NtkDelete(pNtkSpec);
     Abc_NtkDelete(pNtkImpl);
     Abc_FrameReplaceCurrentNetwork(pAbc, pNtkRect);

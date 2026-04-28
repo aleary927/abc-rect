@@ -16,7 +16,7 @@ void SubPiByIdx(Abc_Ntk_t *pNtk, int startIdx, Vec_Int_t *vConsts, int fDelete);
 Rectify a implementation by applying an iterative SAT-based approach. 
 returns NULL if rectification not possible.
 */
-Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
+Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl, int fVerbose)
 {
     /*
     important invariant: 
@@ -47,7 +47,6 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
     while (1) 
     {
         iterations++;
-        printf("Iteration %d \n", iterations);
 
         // convert aig into sat
         sat_solver *pSat = Abc_NtkMiterSatCreate(pNtkTarget, 0);
@@ -140,11 +139,15 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
             if (!f0 || !f1 || !out) 
             {
                 changeCount++;
-                printf("Node %d (Name: %s) fixed with config: [%d %d %d]\n", 
+                if (fVerbose)
+                {
+                    printf("Node %d (Name: %s) fixed with config: [%d %d %d]\n", 
                         pNode->Id, Abc_ObjName(pNode), f0, f1, out);
+                }
             }
             gateIdx++;
         }
+        printf("Number of iterations: %d\n", iterations);
         printf("Total fix points identified: %d\n", changeCount);
         printf("============================\n\n");
 
@@ -174,16 +177,18 @@ where rectification is possible, and computing a patch via interpolation.
 Note: doesn't support multiple rectification points.
 returns NULL if rectification not possible.
 */
-Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
+Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl, int fVerbose)
 {
     int i;
     Abc_Obj_t *pObj, *pTarget;
     int rectPossible = 0;
     Abc_Ntk_t *pNtkM0, *pNtkM1, *pNtkImplConstNode;
     Abc_Aig_t *pMan;
+    int nodeCount = 0;
 
     Abc_AigForEachAnd(pNtkImpl, pObj, i)
     {
+        nodeCount++;
         pNtkImplConstNode = Abc_NtkDup(pNtkImpl);
         pMan = (Abc_Aig_t *) pNtkImplConstNode->pManFunc;
         Abc_AigReplace(pMan, pObj->pCopy, Abc_AigConst1(pNtkImplConstNode), 0);
@@ -209,6 +214,7 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
         Abc_NtkDelete(pNtkM0); 
         Abc_NtkDelete(pNtkM1);
     }
+    printf("Found node where rectification is possible after checking %d nodes.\n", nodeCount);
 
     if (!rectPossible)
     {
