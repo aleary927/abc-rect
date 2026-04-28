@@ -8,40 +8,49 @@ extern Abc_Ntk_t * Abc_NtkInter( Abc_Ntk_t * pNtkOn, Abc_Ntk_t * pNtkOff, int fR
 
 Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk);
 Abc_Ntk_t * BuildTargetMiter(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkCircuit);
-Abc_Obj_t * OrTree(Abc_Ntk_t *pNtk, Vec_Ptr_t *vNodes);
-
+Abc_Obj_t * BuildOrTree(Abc_Ntk_t *pNtk, Vec_Ptr_t *vNodes);
 Vec_Int_t * GetPiSatVarNums(Abc_Ntk_t *pNtk, int nIn, int startIdx);
 void SubPiByIdx(Abc_Ntk_t *pNtk, int startIdx, Vec_Int_t *vConsts, int fDelete);
 
-
+/*
+Rectify a implementation by applying an iterative SAT-based approach. 
+returns NULL if rectification not possible.
+*/
 Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
 {
+    /*
+    important invariant: 
+    All networks used in the iterative SAT loop will have the same number and ordering of PIs, even 
+    if there exist unconnected PIs due to constant substitution.
+    This enables the use of convenient built-in mitering functions.
+    */
     int i, status;
     int nPiNum = Abc_NtkPiNum(pNtkSpec); // num primary inputs
     int iterations = 0; // K
 
     // convert circuit to transformed version (3 muxes and an AND gate)
-    Abc_Ntk_t *pCircuit = BuildCircuitWithTransforms(pNtkImpl); 
-    int nTotalPi = Abc_NtkPiNum(pCircuit); // all inputs
+    Abc_Ntk_t *pNtkCircuit = BuildCircuitWithTransforms(pNtkImpl); 
+    int nTotalPi = Abc_NtkPiNum(pNtkCircuit); // all inputs
     int nXVarNum = nTotalPi - nPiNum; // transformation variables
 
-    // build miter
     // Target = (Circuit(X, In) != Spec(In))
-    Abc_Ntk_t *pTarget = BuildTargetMiter(pNtkSpec, pCircuit); 
-    Abc_Ntk_t *pTargetOrig = Abc_NtkDup(pTarget);
-    Abc_ObjXorFaninC(Abc_NtkPo(pTargetOrig, 0), 0); // Flip to "Equality"
+    Abc_Ntk_t *pNtkTarget = BuildTargetMiter(pNtkSpec, pNtkCircuit); 
+    Abc_Ntk_t *pNtkTargetOrig = Abc_NtkDup(pNtkTarget);
+    // TargetEq = (Circuit(X, In) == Spec(In))
+    Abc_Ntk_t *pNtkTargetEq = Abc_NtkDup(pNtkTarget);       
+    Abc_ObjXorFaninC(Abc_NtkPo(pNtkTargetEq, 0), 0); // Flip to "Equality"
 
-    // store all constraints
+    // network to accumulate all constraints
     // (Circuit(X, in_k) == Spec(in_k))
-    Abc_Ntk_t *pSuccessAcc = NULL; // TestSet
+    Abc_Ntk_t *pNtkConstraintAcc = NULL; 
 
-    while (true) 
+    while (1) 
     {
         iterations++;
         printf("Iteration %d \n", iterations);
 
         // convert aig into sat
-        sat_solver *pSat = Abc_NtkMiterSatCreate(pTarget, 0);
+        sat_solver *pSat = Abc_NtkMiterSatCreate(pNtkTarget, 0);
         status = sat_solver_solve(pSat, NULL, NULL, 0, 0, 0, 0);
 
         // IF UNSAT
@@ -50,44 +59,60 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
             sat_solver_delete(pSat);
             break; 
         }
+        // error
+        if (status != 1)
+        {
+            printf("Error during iterative SAT solving.\n");
+            sat_solver_delete(pSat); 
+            Abc_NtkDelete(pNtkTarget); 
+            Abc_NtkDelete(pNtkTargetOrig);
+            Abc_NtkDelete(pNtkTargetEq);
+            if (pNtkConstraintAcc) 
+            {
+                Abc_NtkDelete(pNtkConstraintAcc);
+            }
+            return NULL;
+        }
 
-        // Otherwise Sat, then continue
-        // extract the Counter-Example (in_k)
-        Vec_Int_t *vInVars = GetPiSatVarNums(pTarget, nPiNum, 0);
+        // SAT
+        // extract the input variable Counter-Example (in_k)
+        Vec_Int_t *vInVars = GetPiSatVarNums(pNtkTarget, nPiNum, 0);
         int *in_k = Sat_SolverGetModel(pSat, vInVars->pArray, nPiNum);
         Vec_Int_t *vIn_k = Vec_IntAllocArray(in_k, nPiNum);
         sat_solver_delete(pSat);
         Vec_IntFree(vInVars);
 
-        // create constraint (Circuit(X, in_k) == Spec(in_k))
-        Abc_Ntk_t *pConstraint = Abc_NtkDup(pTargetOrig);
-        SubPiByIdx(pConstraint, 0, vIn_k, 0);
+        // create new constraint (Circuit(X, in_k) == Spec(in_k))
+        Abc_Ntk_t *pNtkConstraint = Abc_NtkDup(pNtkTargetEq);
+        // don't delete Pis after subsititution to keep consistent ordering
+        SubPiByIdx(pNtkConstraint, 0, vIn_k, 0);
         
-        // accumulate test patterns
-        if (pSuccessAcc == NULL) {
-            pSuccessAcc = pConstraint;
+        // accumulate constraints 
+        if (pNtkConstraintAcc == NULL) {
+            pNtkConstraintAcc = pNtkConstraint;
         } else {
-            Abc_Ntk_t *pOldAcc = pSuccessAcc;
-            pSuccessAcc = Abc_NtkMiterAnd(pSuccessAcc, pConstraint, 0, 0);
-            Abc_NtkDelete(pOldAcc);
-            Abc_NtkDelete(pConstraint);
+            Abc_Ntk_t *pNtkConstraintAccOld = pNtkConstraintAcc;
+            pNtkConstraintAcc = Abc_NtkMiterAnd(pNtkConstraintAcc, pNtkConstraint, 0, 0);
+            Abc_NtkDelete(pNtkConstraintAccOld);
+            Abc_NtkDelete(pNtkConstraint);
         }
 
-        // refine pTarget so no duplicate counterexamples found
-        Abc_Ntk_t *pOldTarget = pTarget;
-        pTarget = Abc_NtkMiterAnd(pTarget, pSuccessAcc, 0, 0);
+        // AND all accumulated constraints with original target miter
+        pNtkTarget = Abc_NtkMiterAnd(pNtkTargetOrig, pNtkConstraintAcc, 0, 0);
 
-        Abc_NtkDelete(pOldTarget);
         Vec_IntFree(vIn_k);
     }
 
-    Abc_NtkDelete(pTargetOrig);
+    Abc_NtkDelete(pNtkTargetEq);
 
     // extract the final solution for X
-    if (pSuccessAcc == NULL) return NULL;
+    if (pNtkConstraintAcc == NULL) 
+    {
+        return NULL;
+    }
 
     // solve for the final valid X assignment
-    sat_solver * pSatFinal = Abc_NtkMiterSatCreate(pSuccessAcc, 0);
+    sat_solver * pSatFinal = Abc_NtkMiterSatCreate(pNtkConstraintAcc, 0);
     int statusFinal = sat_solver_solve(pSatFinal, NULL, NULL, 0, 0, 0, 0);
 
     if (statusFinal == 1) 
@@ -96,7 +121,7 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
         printf("\n=== RECTIFICATION REPORT ===\n");
 
         // get all X values for the muxes
-        Vec_Int_t * vXVars = GetPiSatVarNums(pSuccessAcc, nXVarNum, nPiNum);
+        Vec_Int_t * vXVars = GetPiSatVarNums(pNtkConstraintAcc, nXVarNum, nPiNum);
         int * xVals = Sat_SolverGetModel(pSatFinal, vXVars->pArray, nXVarNum);
         Vec_Int_t *vXVals = Vec_IntAllocArray(xVals, nXVarNum);
 
@@ -123,26 +148,32 @@ Abc_Ntk_t * Abc_RectIterSat(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
         printf("Total fix points identified: %d\n", changeCount);
         printf("============================\n\n");
 
-        // apply new values to rectified circuit 
-        SubPiByIdx(pCircuit, nPiNum, vXVals, 1);
+        // apply transform values to circuit 
+        SubPiByIdx(pNtkCircuit, nPiNum, vXVals, 1);
         Vec_IntFree(vXVars);
     } 
     else // cannot be rectified
     {
         printf("No valid transformation found.\n");
-        Abc_NtkDelete(pCircuit);
-        pCircuit = NULL;
+        Abc_NtkDelete(pNtkCircuit);
+        pNtkCircuit = NULL;
     }
 
     // memory cleanup
     sat_solver_delete(pSatFinal);
-    if (pTarget) Abc_NtkDelete(pTarget);
-    if (pSuccessAcc) Abc_NtkDelete(pSuccessAcc);
+    if (pNtkTarget) Abc_NtkDelete(pNtkTarget);
+    if (pNtkConstraintAcc) Abc_NtkDelete(pNtkConstraintAcc);
 
-    return pCircuit;
+    return pNtkCircuit;
 }
 
 
+/*
+Rectify an implementation by iterating through nodes topographically, finding a node 
+where rectification is possible, and computing a patch via interpolation.
+Note: doesn't support multiple rectification points.
+returns NULL if rectification not possible.
+*/
 Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
 {
     int i;
@@ -150,6 +181,7 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
     int rectPossible = 0;
     Abc_Ntk_t *pNtkM0, *pNtkM1, *pNtkImplConstNode;
     Abc_Aig_t *pMan;
+
     Abc_AigForEachAnd(pNtkImpl, pObj, i)
     {
         pNtkImplConstNode = Abc_NtkDup(pNtkImpl);
@@ -167,7 +199,6 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
         Abc_Ntk_t *pNtkAnd = Abc_NtkMiterAnd(pNtkM0, pNtkM1, 0, 0);
         if (Abc_NtkMiterSat(pNtkAnd, 0, 0, 0, NULL, NULL) == 1)
         {
-            Abc_Print(-2, "Found node where rectification is possible.\n");
             rectPossible = 1;
             pTarget = pObj;
             Abc_NtkDelete(pNtkAnd);
@@ -179,7 +210,12 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
         Abc_NtkDelete(pNtkM1);
     }
 
-    // Abc_Obj_t *pTarget = pNode;
+    if (!rectPossible)
+    {
+        printf("No rectification possible with single node change.\n");
+        return NULL;
+    }
+
     Abc_Ntk_t * pNtkPatch = Abc_NtkInter(pNtkM0, pNtkM1, 0, 0);
 
     if (pNtkPatch == NULL)
@@ -195,11 +231,11 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
 
     Abc_Ntk_t* pNtkRect = Abc_NtkDup(pNtkImpl);
 
+    // copy patch into rectified circuit
     Abc_NtkForEachPi(pNtkPatch, pObj, i)
     {
         pObj->pCopy = Abc_NtkPi(pNtkRect, i);
     }
-
     Abc_AigForEachAnd(pNtkPatch, pObj, i)
     {
         pObj->pCopy = Abc_AigAnd(
@@ -208,7 +244,7 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
             Abc_ObjChild1Copy(pObj)
         );
     }
-
+    // replace targete node with patch
     Abc_AigReplace(
         (Abc_Aig_t *)pNtkRect->pManFunc, 
         pTarget->pCopy, 
@@ -216,9 +252,13 @@ Abc_Ntk_t * Abc_RectNaive(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkImpl)
         0
     );
 
+    Abc_NtkDelete(pNtkPatch);
     return pNtkRect;
 }
 
+/*
+Replace all AND gates in the given network with AND gate that has a mux on each input and on output.
+*/
 Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk)
 {
     Abc_Ntk_t *pNtkCircuit = Abc_NtkDup(pNtk);
@@ -226,7 +266,7 @@ Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk)
     int i;
     Abc_AigForEachAnd(pNtk, pObj, i)
     {
-        // build fanin muxs
+        // build fanin MUXs
         pNewPi = Abc_NtkCreatePi(pNtkCircuit);
         pFanin0Mux = Abc_AigMux
             ((Abc_Aig_t *)pNtkCircuit->pManFunc, 
@@ -241,13 +281,13 @@ Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk)
             Abc_ObjChild1Copy(pObj), 
             Abc_ObjNot(Abc_ObjChild1Copy(pObj))
         );
-
-        // and between fanin muxs
+        // AND between fanin MUXs
         pFaninMuxAnd = Abc_AigAnd(
             (Abc_Aig_t *)pNtkCircuit->pManFunc, 
             pFanin0Mux, 
             pFanin1Mux
         );
+        // output MUX
         pNewPi = Abc_NtkCreatePi(pNtkCircuit);
         Abc_Obj_t *pOutMux = Abc_AigMux(
             (Abc_Aig_t *)pNtkCircuit->pManFunc, 
@@ -255,6 +295,7 @@ Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk)
             pFaninMuxAnd, 
             Abc_ObjNot(pFaninMuxAnd)
         ); 
+        // replace node
         Abc_AigReplace(
             (Abc_Aig_t *)pNtkCircuit->pManFunc, 
             pObj->pCopy,
@@ -264,12 +305,16 @@ Abc_Ntk_t * BuildCircuitWithTransforms(Abc_Ntk_t *pNtk)
         // new copy is now the output of the mux
         pObj->pCopy = pOutMux;
     }
+
     assert(Abc_AigCheck((Abc_Aig_t *)pNtkCircuit->pManFunc));
     assert(Abc_NtkPiNum(pNtkCircuit) == Abc_NtkPiNum(pNtk) + Abc_NtkNodeNum(pNtk)*3);
-
     return pNtkCircuit;
 }
 
+/*
+Build a miter which is between specification network and a network which contains transformation variables in addition to 
+the original PIs.
+*/
 Abc_Ntk_t * BuildTargetMiter(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkCircuit)
 {
     int i;
@@ -320,7 +365,7 @@ Abc_Ntk_t * BuildTargetMiter(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkCircuit)
     }
 
     // create OR tree to join all XORs for miter output
-    Abc_Obj_t *pMiterNode = OrTree(pNtkTarget, vXors);
+    Abc_Obj_t *pMiterNode = BuildOrTree(pNtkTarget, vXors);
     Vec_PtrFree(vXors);
 
     // miter output for target
@@ -328,13 +373,15 @@ Abc_Ntk_t * BuildTargetMiter(Abc_Ntk_t *pNtkSpec, Abc_Ntk_t *pNtkCircuit)
     Abc_ObjAddFanin(pMiterPo, pMiterNode);
 
     assert(Abc_AigCheck((Abc_Aig_t *)pNtkTarget->pManFunc));
-
     return pNtkTarget;
 }
 
-
-Abc_Obj_t * OrTree(Abc_Ntk_t *pNtk, Vec_Ptr_t *vNodes)
+/*
+Build a tree of ORs to join multiple nodes into a single node.
+*/
+Abc_Obj_t * BuildOrTree(Abc_Ntk_t *pNtk, Vec_Ptr_t *vNodes)
 {
+    // terminating conditions
     if (Vec_PtrSize(vNodes) == 0)
     {
         return Abc_ObjNot(Abc_AigConst1(pNtk));
@@ -344,8 +391,8 @@ Abc_Obj_t * OrTree(Abc_Ntk_t *pNtk, Vec_Ptr_t *vNodes)
         return (Abc_Obj_t *)Vec_PtrEntry(vNodes, 0);
     }
 
+    // create one level of ORs
     Vec_Ptr_t *vOutputs = Vec_PtrAlloc((Vec_PtrSize(vNodes) >> 1) + 1);
-
     for (int i = 0; i < Vec_PtrSize(vNodes); i += 2)
     {
         // handle case where odd number of nodes
@@ -366,12 +413,18 @@ Abc_Obj_t * OrTree(Abc_Ntk_t *pNtk, Vec_Ptr_t *vNodes)
         }
     }
 
-    Abc_Obj_t* retval = OrTree(pNtk, vOutputs);
+    // build next level
+    Abc_Obj_t* retval = BuildOrTree(pNtk, vOutputs);
     Vec_PtrFree(vOutputs); 
     return retval;
 }
 
-
+/*
+Get the SAT variable numbers for the PIs of the given network, assuming a miter was just created using the 
+Abc_NtkMiterSatCreate function.
+nIn: number of PIs vars to get 
+startIdx: index of first PI var to get
+*/
 Vec_Int_t * GetPiSatVarNums(Abc_Ntk_t *pNtk, int nIn, int startIdx)
 {
     Vec_Int_t * vCiIds;
@@ -384,10 +437,16 @@ Vec_Int_t * GetPiSatVarNums(Abc_Ntk_t *pNtk, int nIn, int startIdx)
     return vCiIds;
 }
 
+/*
+Substitute PIs with constants in the vConsts vector starting with PI startIdx. 
+If fDelete is true, also deletes the substituted PIs from the network. 
+*/
 void SubPiByIdx(Abc_Ntk_t *pNtk, int startIdx, Vec_Int_t *vConsts, int fDelete)
 {
     Abc_Obj_t *pObj;
     int c, i;
+
+    // substitution
     Vec_Ptr_t *vPis = Vec_PtrAlloc(vConsts->nSize);
     Vec_IntForEachEntry(vConsts, c, i)
     {
@@ -408,6 +467,7 @@ void SubPiByIdx(Abc_Ntk_t *pNtk, int startIdx, Vec_Int_t *vConsts, int fDelete)
         return;
     }
 
+    // deletion
     Vec_PtrForEachEntry(Abc_Obj_t *, vPis, pObj, i)
     {
         assert(Abc_ObjFanoutNum(pObj) == 0);
